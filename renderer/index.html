@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Composer</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部工具栏 -->
+        <header id="toolbar">
+            <div class="toolbar-left">
+                <h1>Image Composer</h1>
+                <span class="version">v0.6.0</span>
+            </div>
+            <div class="toolbar-center">
+                <button id="btn-process-all" class="btn btn-primary" style="background: #e74c3c;">一键处理</button>
+                <button id="btn-scan-local" class="btn btn-primary">扫描本地图片</button>
+                <button id="btn-compose" class="btn btn-success">开始合成</button>
+                <button id="btn-watch" class="btn btn-warning">开始监听</button>
+                <button id="btn-settings" class="btn btn-secondary">设置</button>
+            </div>
+            <div class="toolbar-right">
+                <span id="status-indicator" class="status-offline">未连接</span>
+            </div>
+        </header>
+
+        <!-- 主内容区 -->
+        <main id="main-content">
+            <!-- 顶部：Google Sheets 加载区 -->
+            <section id="sheets-panel" class="panel sheets-panel">
+                <div class="panel-header">
+                    <h2>Google Sheets</h2>
+                    <button id="btn-load-sheets" class="btn btn-primary">加载表格</button>
+                    <span id="sheets-status" class="sheets-status">未加载</span>
+                </div>
+                <p class="sheets-hint">表格链接在设置中配置</p>
+            </section>
+
+            <!-- 左侧：SKU 列表 -->
+            <section id="sku-panel" class="panel">
+                <div class="panel-header">
+                    <h2>SKU 列表（从表格识别）</h2>
+                    <input type="text" id="sku-search" placeholder="搜索 SKU..." class="search-input">
+                </div>
+                <div id="sku-list" class="list-container">
+                    <!-- SKU 项将动态生成 -->
+                </div>
+                <div class="panel-footer">
+                    <span id="sku-count">共 0 个 SKU</span>
+                    <button id="btn-select-all" class="btn btn-sm">全选</button>
+                </div>
+            </section>
+
+            <!-- 中间：本地图片列表 -->
+            <section id="local-image-panel" class="panel">
+                <div class="panel-header">
+                    <h2>本地原始图片</h2>
+                    <span id="local-image-status">未扫描</span>
+                </div>
+                <div id="local-image-list" class="list-container">
+                    <!-- 图片列表将动态生成 -->
+                </div>
+                <div class="panel-footer">
+                    <span id="local-image-count">共 0 张图片</span>
+                </div>
+            </section>
+
+            <!-- 右侧：匹配结果 -->
+            <section id="match-result-panel" class="panel">
+                <div class="panel-header">
+                    <h2>匹配结果</h2>
+                    <span id="match-status">未匹配</span>
+                </div>
+                <div id="match-result-list" class="list-container">
+                    <!-- 匹配结果将动态生成 -->
+                </div>
+                <div class="panel-footer">
+                    <span id="match-count">匹配成功: 0 | 未匹配: 0</span>
+                </div>
+            </section>
+
+            <!-- 日志面板 -->
+            <section id="log-panel" class="panel">
+                <div class="panel-header">
+                    <h2>运行日志</h2>
+                    <button id="btn-clear-log" class="btn btn-sm">清空</button>
+                </div>
+                <div id="log-container" class="log-container">
+                    <!-- 日志将动态生成 -->
+                </div>
+            </section>
+        </main>
+
+        <!-- 底部状态栏 -->
+        <footer id="statusbar">
+            <div class="statusbar-left">
+                <span id="status-message">就绪</span>
+            </div>
+            <div class="statusbar-right">
+                <span id="progress-info">-</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 设置模态框 -->
+    <div id="settings-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>设置</h2>
+                <button id="btn-close-settings" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="setting-group">
+                    <label>Google Sheets 链接:</label>
+                    <input type="text" id="setting-sheets-id" class="setting-input" placeholder="https://docs.google.com/spreadsheets/d/...">
+                </div>
+                <div class="setting-group">
+                    <label>本地图片文件夹:</label>
+                    <input type="text" id="setting-local-folder" class="setting-input" placeholder="C:\Images\products">
+                </div>
+                <div class="setting-group">
+                    <label>合成输出文件夹:</label>
+                    <input type="text" id="setting-output-folder" class="setting-input" placeholder="C:\Images\output">
+                </div>
+                <div class="setting-group">
+                    <label>预处理输入文件夹:</label>
+                    <input type="text" id="setting-preprocess-input" class="setting-input" placeholder="C:\Images\raw">
+                </div>
+                <div class="setting-group">
+                    <label>Google Drive 文件夹 ID:</label>
+                    <input type="text" id="setting-drive-folder" class="setting-input" placeholder="1ABC123xyz...">
+                    <p style="color: #666; font-size: 11px; margin-top: 4px;">从 Google Drive 文件夹 URL 中提取 ID</p>
+                </div>
+                <hr style="border: none; border-top: 1px solid #2a2a38; margin: 16px 0;">
+                <div class="setting-group">
+                    <label>SKU 列名:</label>
+                    <input type="text" id="setting-sku-column" class="setting-input" value="SKU">
+                </div>
+                <div class="setting-group">
+                    <label>状态列名:</label>
+                    <input type="text" id="setting-status-column" class="setting-input" value="Status">
+                </div>
+                <div class="setting-group">
+                    <label>活跃状态值:</label>
+                    <input type="text" id="setting-active-status" class="setting-input" value="active">
+                </div>
+                <div class="setting-group-row">
+                    <div class="setting-group half">
+                        <label>合成宽度:</label>
+                        <input type="number" id="setting-compose-width" class="setting-input" value="800">
+                    </div>
+                    <div class="setting-group half">
+                        <label>合成高度:</label>
+                        <input type="number" id="setting-compose-height" class="setting-input" value="800">
+                    </div>
+                </div>
+                <hr style="border: none; border-top: 1px solid #2a2a38; margin: 16px 0;">
+                <div class="setting-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="setting-watermark-enabled">
+                        <span>启用水印功能</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <label>水印图路径:</label>
+                    <input type="text" id="setting-watermark-path" class="setting-input" placeholder="E:\DESTOP\se\image-composer-electron\watermark.png">
+                </div>
+                <div class="setting-group">
+                    <label>水印宽度 (px):</label>
+                    <input type="number" id="setting-watermark-width" class="setting-input" value="1080">
+                </div>
+                <hr style="border: none; border-top: 1px solid #2a2a38; margin: 16px 0;">
+                <div class="setting-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="setting-watch-enabled">
+                        <span>启用自动监听</span>
+                    </label>
+                </div>
+                <div class="setting-group">
+                    <label>监听间隔 (秒):</label>
+                    <input type="number" id="setting-watch-interval" class="setting-input" value="60" min="10" max="3600">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-save-settings" class="btn btn-primary">保存配置</button>
+                <button id="btn-cancel-settings" class="btn btn-secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+
+    <!-- 新增SKU提示弹窗 -->
+    <div id="new-sku-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>检测到新增 SKU</h2>
+            </div>
+            <div class="modal-body">
+                <p id="new-sku-message">检测到以下新增 SKU，请确认是否继续处理：</p>
+                <div id="new-sku-list" class="sku-confirm-list"></div>
+                <p class="modal-hint">点击"继续"将自动进行预处理和合成</p>
+            </div>
+            <div class="modal-footer">
+                <button id="btn-new-sku-continue" class="btn btn-primary">继续处理</button>
+                <button id="btn-new-sku-cancel" class="btn btn-secondary">稍后处理</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

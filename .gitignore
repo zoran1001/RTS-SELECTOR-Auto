@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+release/
+dist/
+
+# Config files with sensitive data
+config.yaml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Electron specific
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Credentials
+credentials.json
+token.json
