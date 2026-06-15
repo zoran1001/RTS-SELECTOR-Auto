@@ -748,15 +748,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 保存配置（到本地 store）
     async function saveSettings() {
-        const sheetsUrl = document.getElementById('setting-sheets-id').value.trim();
+        // 获取表格链接并清理（移除反引号等）
+        let sheetsUrl = document.getElementById('setting-sheets-id').value.trim();
+        sheetsUrl = sheetsUrl.replace(/^[`'"]|[`'"]$/g, ''); // 移除首尾的反引号和引号
+        
+        // 获取 Drive 文件夹 ID 并清理
+        let driveFolderId = document.getElementById('setting-drive-folder').value.trim();
+        driveFolderId = driveFolderId.replace(/^[`'"]|[`'"]$/g, '');
+        // 如果是完整 URL，提取 ID
+        const driveMatch = driveFolderId.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+        if (driveMatch) {
+            driveFolderId = driveMatch[1];
+        }
         
         // 从 URL 中提取 sheetsId
         let sheetsId = '';
-        if (sheetsUrl) {
-            const match = sheetsUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-            if (match) {
-                sheetsId = match[1];
-            }
+        const sheetsMatch = sheetsUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+        if (sheetsMatch) {
+            sheetsId = sheetsMatch[1];
         }
         
         const config = {
@@ -766,7 +775,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localFolder: document.getElementById('setting-local-folder').value.trim(),
             outputFolder: document.getElementById('setting-output-folder').value.trim(),
             preprocessInput: document.getElementById('setting-preprocess-input').value.trim(),
-            driveFolderId: document.getElementById('setting-drive-folder').value.trim(),
+            driveFolderId: driveFolderId,
             sku_column: document.getElementById('setting-sku-column').value.trim() || 'SKU',
             status_column: document.getElementById('setting-status-column').value.trim() || 'Status',
             active_status: document.getElementById('setting-active-status').value.trim() || 'active',
