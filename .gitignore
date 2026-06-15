@@ -5,13 +5,15 @@ node_modules/
 release/
 dist/
 
-# Config files with sensitive data
-config.yaml
-
-# Python cache
-__pycache__/
+# PyInstaller build files
+bridge/.build/
+bridge/*.spec
+bridge/__pycache__/
 *.pyc
 *.pyo
+
+# Config files with sensitive data
+config.yaml
 
 # Electron specific
 *.log
@@ -21,5 +23,13 @@ __pycache__/
 Thumbs.db
 
 # Credentials
+credentials/
 credentials.json
 token.json
+
+# Python bytecode
+*.pyc
+*.pyo
+
+# Packaged application
+*.exe

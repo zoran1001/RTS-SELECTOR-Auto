@@ -1,7 +1,11 @@
 // renderer.js - Image Composer Electron 前端逻辑 v0.6.0
 // 新流程：加载表格 → 扫描本地图片 → 匹配 → 合成
+// 支持中英文翻译
 
 document.addEventListener('DOMContentLoaded', () => {
+    // 初始化语言系统
+    window.i18n.initLanguage();
+    
     // DOM 元素
     const sheetsStatus = document.getElementById('sheets-status');
     const skuList = document.getElementById('sku-list');
@@ -17,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const statusMessage = document.getElementById('status-message');
     const progressInfo = document.getElementById('progress-info');
     const settingsModal = document.getElementById('settings-modal');
+    const languageModal = document.getElementById('language-modal');
     const statusIndicator = document.getElementById('status-indicator');
 
     // 状态变量
@@ -30,32 +35,148 @@ document.addEventListener('DOMContentLoaded', () => {
     let watchInterval = 60000;     // 默认60秒
     let watchTimer = null;
     let pendingNewSKUs = [];       // 待处理的新增SKU
+    
+    // 日志缓存 - 用于语言切换时重新翻译
+    let logCache = [];
 
     // 初始化
     init();
 
     async function init() {
+        // 应用翻译
+        applyTranslations();
+        
+        // 绑定事件
         bindEvents();
         
-        // 快速健康检查（异步）
-        checkHealth();
+        // 监听语言变更事件
+        window.addEventListener('languageChanged', () => {
+            applyTranslations();
+        });
         
-        // 加载配置并自动启动（异步）
+        // 检查是否需要显示语言选择弹窗
+        const savedLang = localStorage.getItem('appLanguage');
+        if (!savedLang) {
+            showLanguageModal();
+        } else {
+            // 隐藏语言弹窗，开始初始化
+            languageModal.classList.add('hidden');
+            
+            // 快速健康检查（异步）
+            checkHealth();
+            
+            // 加载配置并自动启动（异步）
+            loadConfig().then(() => {
+                autoStartIfPossible();
+            });
+            
+            log(window.i18n.t('log_app_started'), 'info', 'log_app_started');
+            updateStatus(window.i18n.t('status_ready'));
+        }
+    }
+    
+    // 应用翻译到所有元素
+    function applyTranslations() {
+        // 翻译所有带有 data-i18n 属性的元素
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+            const key = el.getAttribute('data-i18n');
+            const paramsAttr = el.getAttribute('data-i18n-params');
+            let params = {};
+            if (paramsAttr) {
+                try {
+                    params = JSON.parse(paramsAttr);
+                } catch (e) {}
+            }
+            el.textContent = window.i18n.t(key, params);
+        });
+        
+        // 翻译所有带有 data-i18n-placeholder 属性的元素
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+            const key = el.getAttribute('data-i18n-placeholder');
+            el.placeholder = window.i18n.t(key);
+        });
+        
+        // 更新监听按钮状态
+        const watchBtn = document.getElementById('btn-watch');
+        if (watchEnabled) {
+            watchBtn.textContent = window.i18n.t('btn_stop_watch');
+        } else {
+            watchBtn.textContent = window.i18n.t('btn_watch');
+        }
+        
+        // 重新渲染日志
+        rerenderLogs();
+    }
+    
+    // 重新渲染日志（语言切换时调用）
+    function rerenderLogs() {
+        logContainer.innerHTML = '';
+        
+        logCache.forEach(entry => {
+            const div = document.createElement('div');
+            div.className = `log-entry log-${entry.type}`;
+            
+            const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN');
+            let message = entry.message;
+            
+            // 如果有翻译 key，重新翻译
+            if (entry.key) {
+                try {
+                    message = window.i18n.t(entry.key, entry.params || {});
+                } catch (e) {
+                    // 如果翻译失败，使用原始消息
+                }
+            }
+            
+            div.textContent = `[${time}] ${message}`;
+            logContainer.appendChild(div);
+        });
+        
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+    
+    // 显示语言选择弹窗
+    function showLanguageModal() {
+        languageModal.classList.remove('hidden');
+    }
+    
+    // 隐藏语言选择弹窗
+    function hideLanguageModal() {
+        languageModal.classList.add('hidden');
+        
+        // 开始初始化
+        checkHealth();
         loadConfig().then(() => {
             autoStartIfPossible();
         });
         
-        log('Image Composer v0.6.0 已启动', 'info');
-        updateStatus('就绪');
+        log(window.i18n.t('log_app_started'), 'info', 'log_app_started');
+        updateStatus(window.i18n.t('status_ready'));
     }
     
+    // 切换语言
+    function switchLanguage(lang) {
+        window.i18n.setLanguage(lang);
+        hideLanguageModal();
+    }
+    
+    // 快速切换语言（右上角按钮）
+    function quickSwitchLanguage() {
+        const currentLang = window.i18n.getLanguage();
+        const newLang = currentLang === 'zh' ? 'en' : 'zh';
+        window.i18n.setLanguage(newLang);
+        
+        // 显示提示
+        log(window.i18n.t('log_app_started'), 'info', 'log_app_started');
+    }
+
     // 启动时自动加载（如果之前保存了配置）- 异步执行
     async function autoStartIfPossible() {
         try {
             const sheetsUrl = await window.api.store.get('sheetsUrl');
             
             if (sheetsUrl) {
-                log('检测到保存的表格链接，正在自动加载...', 'info');
+                log(window.i18n.t('log_sheets_auto_loading'), 'info', 'log_sheets_auto_loading');
                 
                 // 加载表格
                 await loadSheetsInternal(sheetsUrl);
@@ -68,11 +189,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function bindEvents() {
         // 工具栏按钮
         document.getElementById('btn-load-sheets').addEventListener('click', () => loadSheets());
+        document.getElementById('btn-refresh-token').addEventListener('click', () => refreshToken());
         document.getElementById('btn-scan-local').addEventListener('click', () => scanLocalImages());
+        document.getElementById('btn-preprocess').addEventListener('click', () => runPreprocess());
         document.getElementById('btn-compose').addEventListener('click', () => composeImages());
         document.getElementById('btn-process-all').addEventListener('click', () => processAll());
         document.getElementById('btn-watch').addEventListener('click', () => toggleWatch());
         document.getElementById('btn-settings').addEventListener('click', () => showSettings());
+        document.getElementById('btn-language').addEventListener('click', () => quickSwitchLanguage());
 
         // SKU 搜索
         skuSearch.addEventListener('input', (e) => filterSKUs(e.target.value));
@@ -89,6 +213,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('btn-new-sku-continue').addEventListener('click', () => handleNewSKUContinue());
         document.getElementById('btn-new-sku-cancel').addEventListener('click', () => hideNewSKUModal());
 
+        // 语言选择弹窗
+        document.getElementById('btn-lang-zh').addEventListener('click', () => switchLanguage('zh'));
+        document.getElementById('btn-lang-en').addEventListener('click', () => switchLanguage('en'));
+
         // 日志
         document.getElementById('btn-clear-log').addEventListener('click', () => clearLog());
 
@@ -104,22 +232,103 @@ document.addEventListener('DOMContentLoaded', () => {
             const health = await window.api.healthCheck();
             if (health.status === 'ok') {
                 statusIndicator.className = 'status-online';
-                statusIndicator.textContent = '已连接';
-                log('后端服务已连接', 'success');
+                statusIndicator.textContent = window.i18n.t('status_connected');
+                log(window.i18n.t('log_backend_connected'), 'success', 'log_backend_connected');
                 
                 if (health.credentials_valid) {
-                    log('凭证已验证有效，无需再次验证', 'success');
+                    log(window.i18n.t('log_credentials_valid'), 'success', 'log_credentials_valid');
                 } else {
-                    log('凭证未验证或已过期，请检查设置', 'warning');
+                    log(window.i18n.t('log_credentials_invalid'), 'warning', 'log_credentials_invalid');
                 }
             } else {
                 statusIndicator.className = 'status-offline';
-                statusIndicator.textContent = '未连接';
+                statusIndicator.textContent = window.i18n.t('status_offline');
             }
         } catch (err) {
             statusIndicator.className = 'status-offline';
-            statusIndicator.textContent = '未连接';
-            log('无法连接后端服务', 'error');
+            statusIndicator.textContent = window.i18n.t('status_offline');
+            log(window.i18n.t('log_backend_offline'), 'error', 'log_backend_offline');
+        }
+    }
+
+    // 更新凭证（刷新 OAuth2 token）
+    async function refreshToken() {
+        log(window.i18n.t('log_refresh_token_start'), 'info', 'log_refresh_token_start');
+        updateStatus(window.i18n.t('status_refreshing_token'));
+        
+        try {
+            const result = await window.api.refreshToken();
+            
+            if (result.success) {
+                log(window.i18n.t('log_refresh_token_success'), 'success', 'log_refresh_token_success');
+                updateStatus(window.i18n.t('status_token_refreshed'));
+                
+                // 重新检查健康状态
+                await checkHealth();
+            } else {
+                log(window.i18n.t('log_refresh_token_failed', { error: result.error || 'Unknown' }), 'error', 'log_refresh_token_failed', { error: result.error || 'Unknown' });
+                updateStatus(window.i18n.t('status_refresh_failed'));
+            }
+        } catch (err) {
+            log(window.i18n.t('log_refresh_token_error', { error: err.message }), 'error', 'log_refresh_token_error', { error: err.message });
+            updateStatus(window.i18n.t('status_refresh_failed'));
+        }
+    }
+    
+    // 单独运行预处理
+    async function runPreprocess() {
+        if (currentSKUs.length === 0) {
+            alert(window.i18n.t('alert_no_skus'));
+            return;
+        }
+        
+        log(window.i18n.t('log_preprocess_start'), 'info', 'log_preprocess_start');
+        updateStatus(window.i18n.t('status_preprocessing'));
+        
+        try {
+            const skus = currentSKUs.map(s => s.sku);
+            const result = await window.api.preprocess(skus);
+            
+            if (result.success) {
+                log(window.i18n.t('log_preprocess_done', { count: result.processed }), 'success', 'log_preprocess_done', { count: result.processed });
+                
+                if (result.not_found && result.not_found.length > 0) {
+                    log(window.i18n.t('log_preprocess_not_found', { count: result.not_found.length }), 'warning', 'log_preprocess_not_found', { count: result.not_found.length });
+                    
+                    // 尝试从 Google Drive 下载
+                    const driveResult = await window.api.driveSearchDownload(
+                        result.not_found,
+                        null,
+                        null,
+                        true
+                    );
+                    
+                    if (driveResult.success) {
+                        if (driveResult.downloaded > 0) {
+                            log(window.i18n.t('log_drive_downloaded', { count: driveResult.downloaded }), 'success', 'log_drive_downloaded', { count: driveResult.downloaded });
+                        }
+                        
+                        if (driveResult.total_scanned !== undefined) {
+                            log(window.i18n.t('log_drive_scanned', { count: driveResult.total_scanned }), 'info', 'log_drive_scanned', { count: driveResult.total_scanned });
+                        }
+                        
+                        if (driveResult.not_found && driveResult.not_found.length > 0) {
+                            log(window.i18n.t('log_drive_not_found', { count: driveResult.not_found.length }), 'warning', 'log_drive_not_found', { count: driveResult.not_found.length });
+                        }
+                    }
+                }
+                
+                updateStatus(window.i18n.t('status_preprocess_done'));
+                
+                // 重新扫描本地图片
+                await scanLocalImages();
+            } else {
+                log(window.i18n.t('log_preprocess_failed', { error: result.error || 'Unknown' }), 'error', 'log_preprocess_failed', { error: result.error || 'Unknown' });
+                updateStatus(window.i18n.t('status_preprocess_failed'));
+            }
+        } catch (err) {
+            log(window.i18n.t('log_preprocess_error', { error: err.message }), 'error', 'log_preprocess_error', { error: err.message });
+            updateStatus(window.i18n.t('status_preprocess_failed'));
         }
     }
 
@@ -128,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 从设置中读取链接
         const url = await window.api.store.get('sheetsUrl');
         if (!url) {
-            alert('请先在设置中配置 Google Sheets 链接');
+            alert(window.i18n.t('alert_sheets_url_required'));
             showSettings();
             return;
         }
@@ -142,15 +351,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        log(`开始读取 Google Sheets...`, 'info');
-        updateStatus('正在读取表格...');
-        sheetsStatus.textContent = '读取中...';
+        log(window.i18n.t('log_sheets_loading'), 'info', 'log_sheets_loading');
+        updateStatus(window.i18n.t('status_loading_sheets'));
+        sheetsStatus.textContent = window.i18n.t('sheets_status_loading');
         sheetsStatus.className = 'sheets-status loading';
 
         try {
             const config = await window.api.getConfig();
+            const apiKey = await window.api.store.get('apiKey');
             const result = await window.api.loadSheets({
                 sheets_url: url,
+                api_key: apiKey || '',
                 sku_column: config.sku_column || 'SKU',
                 product_name_column: config.product_name_column || 'title',
                 status_column: config.status_column || 'Status',
@@ -161,21 +372,21 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.items) {
                 currentSKUs = result.items;
                 renderSKUList(result.items);
-                sheetsStatus.textContent = `已加载 ${result.filtered} 条`;
+                sheetsStatus.textContent = window.i18n.t('sheets_status_loaded', { count: result.filtered });
                 sheetsStatus.className = 'sheets-status success';
-                log(`✅ Sheets 加载完成: ${result.total_rows} 行, 识别到 ${result.filtered} 个 SKU`, 'success');
-                updateStatus(`已识别 ${result.filtered} 个 SKU`);
+                log(window.i18n.t('log_sheets_loaded', { total: result.total_rows, filtered: result.filtered }), 'success', 'log_sheets_loaded', { total: result.total_rows, filtered: result.filtered });
+                updateStatus(window.i18n.t('status_sheets_loaded', { count: result.filtered }));
             } else {
-                log('❌ Sheets 加载失败: ' + (result.error || '未知错误'), 'error');
-                sheetsStatus.textContent = '加载失败';
+                log(window.i18n.t('log_sheets_failed', { error: result.error || 'Unknown' }), 'error', 'log_sheets_failed', { error: result.error || 'Unknown' });
+                sheetsStatus.textContent = window.i18n.t('sheets_status_failed');
                 sheetsStatus.className = 'sheets-status error';
-                updateStatus('加载失败');
+                updateStatus(window.i18n.t('status_sheets_failed'));
             }
         } catch (err) {
-            log('❌ Sheets 出错: ' + err.message, 'error');
-            sheetsStatus.textContent = '出错';
+            log(window.i18n.t('log_sheets_error', { error: err.message }), 'error', 'log_sheets_error', { error: err.message });
+            sheetsStatus.textContent = window.i18n.t('sheets_status_error');
             sheetsStatus.className = 'sheets-status error';
-            updateStatus('出错');
+            updateStatus(window.i18n.t('status_sheets_error'));
         }
     }
 
@@ -200,8 +411,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // 图片状态列
             const statusSpan = document.createElement('span');
             statusSpan.className = 'sku-image-status';
-            statusSpan.textContent = '❓';  // 初始状态：未识别
-            statusSpan.title = '图片未识别';
+            statusSpan.textContent = window.i18n.t('sku_image_status_unknown');
+            statusSpan.title = window.i18n.t('sku_image_status_unknown');
             statusSpan.style.color = '#ffa502';
 
             row.appendChild(skuLabel);
@@ -210,14 +421,14 @@ document.addEventListener('DOMContentLoaded', () => {
             skuList.appendChild(row);
         });
 
-        skuCount.textContent = `共 ${items.length} 个 SKU`;
+        skuCount.textContent = window.i18n.t('sku_count', { count: items.length });
     }
 
     // 步骤2：扫描本地图片文件夹（带 UI）
     async function scanLocalImages() {
-        log('开始扫描本地图片文件夹...', 'info');
-        updateStatus('正在扫描本地图片...');
-        localImageStatus.textContent = '扫描中...';
+        log(window.i18n.t('log_local_scanning'), 'info', 'log_local_scanning');
+        updateStatus(window.i18n.t('status_scanning'));
+        localImageStatus.textContent = window.i18n.t('local_image_status_scanning');
 
         try {
             const result = await window.api.scanLocalImages();
@@ -225,22 +436,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.images) {
                 localImages = result.images;
                 renderLocalImageList(result.images);
-                localImageStatus.textContent = `已扫描`;
+                localImageStatus.textContent = window.i18n.t('local_image_status_scanned');
                 localImageStatus.className = 'status-success';
-                log(`✅ 本地图片扫描完成: 找到 ${result.images.length} 张图片`, 'success');
-                updateStatus(`找到 ${result.images.length} 张图片`);
+                log(window.i18n.t('log_local_scanned', { count: result.images.length }), 'success', 'log_local_scanned', { count: result.images.length });
+                updateStatus(window.i18n.t('status_scanned', { count: result.images.length }));
                 
                 // 自动识别匹配：扫描完图片后自动更新 SKU 列表的匹配状态
                 await autoMatchSKUs();
             } else {
-                log('❌ 扫描失败: ' + (result.error || '未知错误'), 'error');
-                localImageStatus.textContent = '扫描失败';
-                updateStatus('扫描失败');
+                log(window.i18n.t('log_local_failed', { error: result.error || 'Unknown' }), 'error', 'log_local_failed', { error: result.error || 'Unknown' });
+                localImageStatus.textContent = window.i18n.t('local_image_status_failed');
+                updateStatus(window.i18n.t('status_scan_failed'));
             }
         } catch (err) {
-            log('❌ 扫描出错: ' + err.message, 'error');
-            localImageStatus.textContent = '出错';
-            updateStatus('出错');
+            log(window.i18n.t('log_local_error', { error: err.message }), 'error', 'log_local_error', { error: err.message });
+            localImageStatus.textContent = window.i18n.t('local_image_status_error');
+            updateStatus(window.i18n.t('status_scan_error'));
         }
     }
     
@@ -252,22 +463,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (result.success && result.images) {
                 localImages = result.images;
                 renderLocalImageList(result.images);
-                localImageStatus.textContent = `已扫描`;
+                localImageStatus.textContent = window.i18n.t('local_image_status_scanned');
                 localImageStatus.className = 'status-success';
-                log(`✅ 本地图片扫描完成: 找到 ${result.images.length} 张图片`, 'success');
-                updateStatus(`找到 ${result.images.length} 张图片`);
+                log(window.i18n.t('log_local_scanned', { count: result.images.length }), 'success', 'log_local_scanned', { count: result.images.length });
+                updateStatus(window.i18n.t('status_scanned', { count: result.images.length }));
                 
                 // 自动识别匹配
                 await autoMatchSKUs();
             } else {
-                log('❌ 扫描失败: ' + (result.error || '未知错误'), 'error');
-                localImageStatus.textContent = '扫描失败';
-                updateStatus('扫描失败');
+                log(window.i18n.t('log_local_failed', { error: result.error || 'Unknown' }), 'error', 'log_local_failed', { error: result.error || 'Unknown' });
+                localImageStatus.textContent = window.i18n.t('local_image_status_failed');
+                updateStatus(window.i18n.t('status_scan_failed'));
             }
         } catch (err) {
-            log('❌ 扫描出错: ' + err.message, 'error');
-            localImageStatus.textContent = '出错';
-            updateStatus('出错');
+            log(window.i18n.t('log_local_error', { error: err.message }), 'error', 'log_local_error', { error: err.message });
+            localImageStatus.textContent = window.i18n.t('local_image_status_error');
+            updateStatus(window.i18n.t('status_scan_error'));
         }
     }
 
@@ -277,8 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        log('自动识别图片匹配状态...', 'info');
-        updateStatus('正在识别匹配...');
+        log(window.i18n.t('log_auto_matching'), 'info', 'log_auto_matching');
+        updateStatus(window.i18n.t('status_matching'));
 
         try {
             const result = await window.api.matchImages(currentSKUs, localImages);
@@ -298,16 +509,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 unmatchedSKUs = result.unmatched_skus;
                 
                 const stats = result.stats;
-                log(`识别完成: 匹配成功 ${stats.matched_count}, 未匹配 ${stats.unmatched_sku_count}`, 'success');
-                updateStatus(`匹配成功 ${stats.matched_count} 个`);
+                log(window.i18n.t('log_match_done', { matched: stats.matched_count, unmatched: stats.unmatched_sku_count }), 'success', 'log_match_done', { matched: stats.matched_count, unmatched: stats.unmatched_sku_count });
+                updateStatus(window.i18n.t('status_matched', { count: stats.matched_count }));
                 
                 // 更新匹配统计显示
-                matchCount.textContent = `✅ 匹配成功: ${stats.matched_count} | ❌ 未匹配: ${stats.unmatched_sku_count}`;
+                matchCount.textContent = window.i18n.t('match_count', { matched: stats.matched_count, unmatched: stats.unmatched_sku_count });
             } else {
-                log('识别失败: ' + (result.error || '未知错误'), 'error');
+                log(window.i18n.t('log_match_failed', { error: result.error || 'Unknown' }), 'error', 'log_match_failed', { error: result.error || 'Unknown' });
             }
         } catch (err) {
-            log('识别出错: ' + err.message, 'error');
+            log(window.i18n.t('log_match_error', { error: err.message }), 'error', 'log_match_error', { error: err.message });
         }
     }
 
@@ -321,10 +532,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
             if (statusSpan) {
                 if (matchedSKUs.has(sku)) {
-                    statusSpan.textContent = '✅';
+                    statusSpan.textContent = window.i18n.t('sku_image_status_matched');
                     statusSpan.className = 'sku-image-status matched';
                 } else {
-                    statusSpan.textContent = '❌';
+                    statusSpan.textContent = window.i18n.t('sku_image_status_unmatched');
                     statusSpan.className = 'sku-image-status unmatched';
                 }
             }
@@ -334,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const total = items.length;
         const matchedCount = matchedSKUs.size;
         const unmatchedCount = total - matchedCount;
-        matchCount.textContent = `✅ 匹配成功: ${matchedCount} | ❌ 未匹配: ${unmatchedCount}`;
+        matchCount.textContent = window.i18n.t('match_count', { matched: matchedCount, unmatched: unmatchedCount });
     }
 
     // 渲染本地图片列表
@@ -359,7 +570,7 @@ document.addEventListener('DOMContentLoaded', () => {
             localImageList.appendChild(item);
         });
 
-        localImageCount.textContent = `共 ${images.length} 张图片`;
+        localImageCount.textContent = window.i18n.t('local_image_count', { count: images.length });
     }
 
     // 渲染匹配结果（用于显示详细信息）
@@ -377,11 +588,11 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const countSpan = document.createElement('span');
             countSpan.className = 'match-count';
-            countSpan.textContent = `${item.images.length} 张图片`;
+            countSpan.textContent = window.i18n.t('match_images_count', { count: item.images.length });
             
             const statusSpan = document.createElement('span');
             statusSpan.className = 'match-status-tag';
-            statusSpan.textContent = '✅';
+            statusSpan.textContent = window.i18n.t('sku_image_status_matched');
             
             row.appendChild(skuSpan);
             row.appendChild(countSpan);
@@ -400,45 +611,45 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const statusSpan = document.createElement('span');
             statusSpan.className = 'match-status-tag';
-            statusSpan.textContent = '❌';
+            statusSpan.textContent = window.i18n.t('sku_image_status_unmatched');
             
             row.appendChild(skuSpan);
             row.appendChild(statusSpan);
             matchResultList.appendChild(row);
         });
 
-        matchCount.textContent = `✅ 匹配成功: ${matched.length} | ❌ 未匹配: ${unmatched.length}`;
+        matchCount.textContent = window.i18n.t('match_count', { matched: matched.length, unmatched: unmatched.length });
     }
 
     // 步骤4：合成图片
     async function composeImages() {
         if (matchedResults.length === 0) {
-            alert('请先进行匹配对照');
+            alert(window.i18n.t('alert_match_required'));
             return;
         }
 
-        log(`开始合成 ${matchedResults.length} 个 SKU 的图片...`, 'info');
-        updateStatus('正在合成图片...');
+        log(window.i18n.t('log_compose_start', { count: matchedResults.length }), 'info', 'log_compose_start', { count: matchedResults.length });
+        updateStatus(window.i18n.t('status_composing'));
 
         try {
             const result = await window.api.compose(matchedResults);
             
             if (result.success) {
-                log(`合成完成: 成功 ${result.composed} 张`, 'success');
-                log(`输出目录: ${result.output_folder}`, 'info');
-                updateStatus('合成完成');
+                log(window.i18n.t('log_compose_done', { count: result.composed }), 'success', 'log_compose_done', { count: result.composed });
+                log(window.i18n.t('log_compose_output', { folder: result.output_folder }), 'info', 'log_compose_output', { folder: result.output_folder });
+                updateStatus(window.i18n.t('status_composed'));
                 
                 if (result.errors && result.errors.length > 0) {
-                    log(`有 ${result.errors.length} 个错误`, 'warning');
+                    log(window.i18n.t('log_compose_errors', { count: result.errors.length }), 'warning', 'log_compose_errors', { count: result.errors.length });
                     result.errors.forEach(err => log(err, 'error'));
                 }
             } else {
-                log('合成失败: ' + (result.error || '未知错误'), 'error');
-                updateStatus('合成失败');
+                log(window.i18n.t('log_compose_failed', { error: result.error || 'Unknown' }), 'error', 'log_compose_failed', { error: result.error || 'Unknown' });
+                updateStatus(window.i18n.t('status_compose_failed'));
             }
         } catch (err) {
-            log('合成出错: ' + err.message, 'error');
-            updateStatus('合成出错');
+            log(window.i18n.t('log_compose_error', { error: err.message }), 'error', 'log_compose_error', { error: err.message });
+            updateStatus(window.i18n.t('status_compose_error'));
         }
     }
 
@@ -446,28 +657,28 @@ document.addEventListener('DOMContentLoaded', () => {
     async function processAll() {
         const url = await window.api.store.get('sheetsUrl');
         if (!url) {
-            alert('请先在设置中配置 Google Sheets 链接');
+            alert(window.i18n.t('alert_sheets_url_required'));
             showSettings();
             return;
         }
 
-        log('=== 开始一键处理 ===', 'info');
-        updateStatus('正在一键处理...');
+        log(window.i18n.t('log_process_all_start'), 'info', 'log_process_all_start');
+        updateStatus(window.i18n.t('status_processing'));
 
         try {
             const result = await window.api.processAll(url);
             
             if (result.success) {
                 const stats = result.stats;
-                log(`一键处理完成！`, 'success');
-                log(`表格识别: ${stats.skus_from_sheets} 个 SKU`, 'info');
-                log(`本地图片: ${stats.images_found} 张`, 'info');
-                log(`匹配成功: ${stats.matched_skus} 个`, 'info');
-                log(`未匹配: ${stats.unmatched_skus} 个`, 'warning');
-                log(`合成完成: ${stats.composed} 张`, 'success');
-                log(`输出目录: ${result.output_folder}`, 'info');
+                log(window.i18n.t('log_process_all_done'), 'success', 'log_process_all_done');
+                log(window.i18n.t('log_process_all_sheets', { count: stats.skus_from_sheets }), 'info', 'log_process_all_sheets', { count: stats.skus_from_sheets });
+                log(window.i18n.t('log_process_all_images', { count: stats.images_found }), 'info', 'log_process_all_images', { count: stats.images_found });
+                log(window.i18n.t('log_process_all_matched', { count: stats.matched_skus }), 'info', 'log_process_all_matched', { count: stats.matched_skus });
+                log(window.i18n.t('log_process_all_unmatched', { count: stats.unmatched_skus }), 'warning', 'log_process_all_unmatched', { count: stats.unmatched_skus });
+                log(window.i18n.t('log_process_all_composed', { count: stats.composed }), 'success', 'log_process_all_composed', { count: stats.composed });
+                log(window.i18n.t('log_compose_output', { folder: result.output_folder }), 'info', 'log_compose_output', { folder: result.output_folder });
                 
-                updateStatus(`处理完成: 合成 ${stats.composed} 张图片`);
+                updateStatus(window.i18n.t('status_processed', { count: stats.composed }));
                 
                 // 更新界面显示
                 if (result.matched) {
@@ -477,15 +688,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 if (result.errors && result.errors.length > 0) {
-                    log(`错误: ${result.errors.length} 个`, 'warning');
+                    log(window.i18n.t('log_compose_errors', { count: result.errors.length }), 'warning', 'log_compose_errors', { count: result.errors.length });
                 }
             } else {
-                log('一键处理失败: ' + (result.error || '未知错误'), 'error');
-                updateStatus('处理失败');
+                log(window.i18n.t('log_process_all_failed', { error: result.error || 'Unknown' }), 'error', 'log_process_all_failed', { error: result.error || 'Unknown' });
+                updateStatus(window.i18n.t('status_process_failed'));
             }
         } catch (err) {
-            log('一键处理出错: ' + err.message, 'error');
-            updateStatus('处理出错');
+            log(window.i18n.t('log_process_all_error', { error: err.message }), 'error', 'log_process_all_error', { error: err.message });
+            updateStatus(window.i18n.t('status_process_error'));
         }
     }
 
@@ -499,6 +710,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (localConfig) {
                 // 加载设置表单
                 document.getElementById('setting-sheets-id').value = localConfig.sheetsId || '';
+                document.getElementById('setting-api-key').value = localConfig.apiKey || '';
                 document.getElementById('setting-local-folder').value = localConfig.localFolder || '';
                 document.getElementById('setting-output-folder').value = localConfig.outputFolder || '';
                 document.getElementById('setting-preprocess-input').value = localConfig.preprocessInput || '';
@@ -512,7 +724,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 加载水印配置
                 const watermarkConfig = localConfig.watermark || {};
                 document.getElementById('setting-watermark-enabled').checked = watermarkConfig.enabled || false;
-                document.getElementById('setting-watermark-path').value = watermarkConfig.path || 'E:\\DESTOP\\se\\image-composer-electron\\watermark.png';
+                document.getElementById('setting-watermark-path').value = watermarkConfig.path || window.i18n.t('watermark_path_default');
                 document.getElementById('setting-watermark-width').value = watermarkConfig.width || 1080;
                 
                 // 加载监听配置
@@ -529,7 +741,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('无本地配置');
             }
         } catch (err) {
-            log('加载配置失败: ' + err.message, 'warning');
+            log(window.i18n.t('log_config_load_failed', { error: err.message }), 'warning', 'log_config_load_failed', { error: err.message });
             console.error('加载配置失败:', err);
         }
     }
@@ -550,6 +762,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const config = {
             sheetsUrl: sheetsUrl,
             sheetsId: sheetsId,
+            apiKey: document.getElementById('setting-api-key').value.trim(),
             localFolder: document.getElementById('setting-local-folder').value.trim(),
             outputFolder: document.getElementById('setting-output-folder').value.trim(),
             preprocessInput: document.getElementById('setting-preprocess-input').value.trim(),
@@ -562,7 +775,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // 水印配置
             watermark: {
                 enabled: document.getElementById('setting-watermark-enabled').checked,
-                path: document.getElementById('setting-watermark-path').value.trim() || 'E:\\DESTOP\\se\\image-composer-electron\\watermark.png',
+                path: document.getElementById('setting-watermark-path').value.trim() || window.i18n.t('watermark_path_default'),
                 width: parseInt(document.getElementById('setting-watermark-width').value) || 1080,
                 position_y: 0
             },
@@ -571,15 +784,15 @@ document.addEventListener('DOMContentLoaded', () => {
             watchInterval: parseInt(document.getElementById('setting-watch-interval').value) || 60
         };
         
-        log(`正在保存配置...`, 'info');
+        log(window.i18n.t('log_config_loading'), 'info', 'log_config_loading');
         
         try {
             // 保存到本地 store
             await window.api.store.setMultiple(config);
-            log('✅ 配置已保存到本地！', 'success');
+            log(window.i18n.t('log_config_saved'), 'success', 'log_config_saved');
             hideSettings();
         } catch (err) {
-            log('❌ 保存配置失败: ' + err.message, 'error');
+            log(window.i18n.t('log_config_failed', { error: err.message }), 'error', 'log_config_failed', { error: err.message });
             console.error('保存配置失败:', err);
         }
     }
@@ -607,7 +820,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function toggleSelectAll() {
         // 新版本不需要选择功能，因为匹配后自动合成
-        log('新版本流程：匹配后自动合成所有', 'info');
+        log(window.i18n.t('log_flow_info'), 'info', 'log_flow_info');
     }
 
     // ===== 监听功能 =====
@@ -619,24 +832,24 @@ document.addEventListener('DOMContentLoaded', () => {
         if (watchEnabled) {
             // 停止监听
             stopWatch();
-            btn.textContent = '开始监听';
+            btn.textContent = window.i18n.t('btn_watch');
             btn.classList.remove('active');
             btn.style.background = '';
-            log('监听已停止', 'info');
+            log(window.i18n.t('log_watch_stopped'), 'info', 'log_watch_stopped');
         } else {
             // 开始监听
             const sheetsUrl = await window.api.store.get('sheetsUrl');
             if (!sheetsUrl) {
-                alert('请先在设置中配置 Google Sheets 链接');
+                alert(window.i18n.t('alert_sheets_url_required'));
                 showSettings();
                 return;
             }
             
             startWatch();
-            btn.textContent = '停止监听';
+            btn.textContent = window.i18n.t('btn_stop_watch');
             btn.classList.add('active');
             btn.style.background = '#e74c3c';
-            log('监听已开始，每分钟检查一次', 'success');
+            log(window.i18n.t('log_watch_started'), 'success', 'log_watch_started');
         }
     }
     
@@ -647,7 +860,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // 从配置获取监听间隔
         getWatchInterval().then(interval => {
             watchInterval = interval;
-            log(`监听间隔: ${watchInterval / 1000} 秒`, 'info');
+            log(window.i18n.t('log_watch_interval', { interval: watchInterval / 1000 }), 'info', 'log_watch_interval', { interval: watchInterval / 1000 });
             
             // 立即执行一次检查
             performWatchCheck();
@@ -685,7 +898,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const sheetsUrl = await window.api.store.get('sheetsUrl');
         if (!sheetsUrl) return;
         
-        log('🔍 正在检查更新...', 'info');
+        log(window.i18n.t('log_watch_checking'), 'info', 'log_watch_checking');
         
         try {
             // 获取当前 SKU 列表
@@ -694,7 +907,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await window.api.watchCheck(sheetsUrl, skuStrings);
             
             if (!result.success) {
-                log('监听检查失败: ' + (result.error || '未知错误'), 'error');
+                log(window.i18n.t('log_watch_failed', { error: result.error || 'Unknown' }), 'error', 'log_watch_failed', { error: result.error || 'Unknown' });
                 return;
             }
             
@@ -702,28 +915,28 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // 处理下架的SKU
             if (removed_skus && removed_skus.length > 0) {
-                log(`检测到下架 SKU: ${removed_skus.length} 个，正在删除...`, 'warning');
+                log(window.i18n.t('log_watch_removed', { count: removed_skus.length }), 'warning', 'log_watch_removed', { count: removed_skus.length });
             }
             
             // 扫描输出目录删除不在表格中的文件
-            log('🔍 正在扫描输出目录，删除不在表格中的文件...', 'info');
+            log(window.i18n.t('log_watch_deleting'), 'info', 'log_watch_deleting');
             const deleteResult = await window.api.watchDelete(sheetsUrl);
             if (deleteResult.success) {
-                log(`✅ 已删除 ${deleteResult.deleted} 个下架文件`, 'success');
+                log(window.i18n.t('log_watch_deleted', { count: deleteResult.deleted }), 'success', 'log_watch_deleted', { count: deleteResult.deleted });
                 if (deleteResult.kept !== undefined) {
-                    log(`📁 保留 ${deleteResult.kept} 个文件`, 'info');
+                    log(window.i18n.t('log_watch_kept', { count: deleteResult.kept }), 'info', 'log_watch_kept', { count: deleteResult.kept });
                 }
             }
             
             // 处理新增的SKU
             if (new_skus && new_skus.length > 0) {
-                log(`⚠️ 检测到新增 SKU: ${new_skus.length} 个`, 'warning');
+                log(window.i18n.t('log_watch_new', { count: new_skus.length }), 'warning', 'log_watch_new', { count: new_skus.length });
                 pendingNewSKUs = new_skus;
                 showNewSKUModal(new_skus);
             }
             
             if ((!new_skus || new_skus.length === 0) && (!removed_skus || removed_skus.length === 0)) {
-                log('✅ 无更新', 'success');
+                log(window.i18n.t('log_watch_no_update'), 'success', 'log_watch_no_update');
             }
             
             // 更新当前SKU列表
@@ -732,7 +945,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
         } catch (err) {
-            log('监听检查出错: ' + err.message, 'error');
+            log(window.i18n.t('log_watch_error', { error: err.message }), 'error', 'log_watch_error', { error: err.message });
         }
     }
     
@@ -768,11 +981,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         hideNewSKUModal();
-        log(`开始处理 ${pendingNewSKUs.length} 个新增 SKU...`, 'info');
+        log(window.i18n.t('log_new_sku_start', { count: pendingNewSKUs.length }), 'info', 'log_new_sku_start', { count: pendingNewSKUs.length });
         
         try {
             // 步骤1：扫描本地文件夹找产品图
-            log('🔍 正在扫描本地产品图...', 'info');
+            log(window.i18n.t('log_new_sku_scanning'), 'info', 'log_new_sku_scanning');
             const scanResult = await window.api.scanLocalImages();
             
             let hasAnyImages = false;
@@ -785,13 +998,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 const matchResult = await window.api.matchImages(pendingNewSKUs, scanResult.images);
                 
                 if (matchResult.success && matchResult.matched && matchResult.matched.length > 0) {
-                    log(`✅ 找到 ${matchResult.matched.length} 个产品图，直接合成`, 'success');
+                    log(window.i18n.t('log_new_sku_found', { count: matchResult.matched.length }), 'success', 'log_new_sku_found', { count: matchResult.matched.length });
                     
                     // 直接合成
                     const composeResult = await window.api.compose(matchResult.matched);
                     
                     if (composeResult.success) {
-                        log(`✅ 合成完成: ${composeResult.composed} 个 SKU`, 'success');
+                        log(window.i18n.t('log_new_sku_composed', { count: composeResult.composed }), 'success', 'log_new_sku_composed', { count: composeResult.composed });
                         processedCount = matchResult.matched.length;
                     }
                     
@@ -802,34 +1015,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     const unprocessed = pendingNewSKUs.filter(s => !processedSKUs.has(s.sku || s));
                     
                     if (unprocessed.length > 0) {
-                        log(`📦 还有 ${unprocessed.length} 个SKU需要预处理原图...`, 'info');
+                        log(window.i18n.t('log_new_sku_preprocess_needed', { count: unprocessed.length }), 'info', 'log_new_sku_preprocess_needed', { count: unprocessed.length });
                         const unprocessedProcessed = await preprocessAndCompose(unprocessed);
                         processedCount += unprocessedProcessed;
                     }
                 } else {
                     // 没有找到产品图，进行预处理
-                    log('⚠️ 没有找到产品图，开始预处理原图...', 'warning');
+                    log(window.i18n.t('log_new_sku_no_product'), 'warning', 'log_new_sku_no_product');
                     processedCount = await preprocessAndCompose(pendingNewSKUs);
                 }
             } else {
                 // 没有本地图片，全部需要预处理
-                log('⚠️ 没有本地图片，开始预处理原图...', 'warning');
+                log(window.i18n.t('log_new_sku_no_local'), 'warning', 'log_new_sku_no_local');
                 processedCount = await preprocessAndCompose(pendingNewSKUs);
             }
             
             // 只有完全没有处理成功时才弹窗
             if (processedCount === 0) {
-                log('⚠️ 未能找到任何图片，请检查原图文件夹和 Google Drive', 'error');
+                log(window.i18n.t('log_new_sku_not_found'), 'error', 'log_new_sku_not_found');
                 // 显示未找到的 SKU 列表
                 const allNotFound = pendingNewSKUs.map(s => s.sku || s);
                 showNewSKUModal(allNotFound.map(sku => ({ sku })));
                 return;
             }
             
-            log('🎉 新增 SKU 处理完成！', 'success');
+            log(window.i18n.t('log_new_sku_done'), 'success', 'log_new_sku_done');
             
         } catch (err) {
-            log('❌ 处理新增 SKU 出错: ' + err.message, 'error');
+            log(window.i18n.t('log_new_sku_error', { error: err.message }), 'error', 'log_new_sku_error', { error: err.message });
         }
         
         pendingNewSKUs = [];
@@ -841,14 +1054,14 @@ document.addEventListener('DOMContentLoaded', () => {
         
         try {
             // 预处理（原图 → 产品图）
-            log('📦 正在进行预处理（原图→产品图）...', 'info');
+            log(window.i18n.t('log_preprocess_start'), 'info', 'log_preprocess_start');
             const preprocessResult = await window.api.preprocess(skus);
             
             if (preprocessResult.success) {
-                log(`✅ 预处理完成: 处理 ${preprocessResult.processed} 个`, 'success');
+                log(window.i18n.t('log_preprocess_done', { count: preprocessResult.processed }), 'success', 'log_preprocess_done', { count: preprocessResult.processed });
                 
                 if (preprocessResult.not_found && preprocessResult.not_found.length > 0) {
-                    log(`⚠️ 本地未找到原图: ${preprocessResult.not_found.length} 个，尝试从 Google Drive 下载...`, 'warning');
+                    log(window.i18n.t('log_preprocess_not_found', { count: preprocessResult.not_found.length }), 'warning', 'log_preprocess_not_found', { count: preprocessResult.not_found.length });
                     
                     // 尝试从 Google Drive 下载
                     const driveResult = await window.api.driveSearchDownload(
@@ -860,16 +1073,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     if (driveResult.success) {
                         if (driveResult.downloaded > 0) {
-                            log(`✅ 从 Google Drive 下载了 ${driveResult.downloaded} 个图片`, 'success');
+                            log(window.i18n.t('log_drive_downloaded', { count: driveResult.downloaded }), 'success', 'log_drive_downloaded', { count: driveResult.downloaded });
                         }
                         
                         // 显示 Google Drive 扫描结果
                         if (driveResult.total_scanned !== undefined) {
-                            log(`📊 Google Drive 扫描了 ${driveResult.total_scanned} 个图片文件`, 'info');
+                            log(window.i18n.t('log_drive_scanned', { count: driveResult.total_scanned }), 'info', 'log_drive_scanned', { count: driveResult.total_scanned });
                         }
                         
                         if (driveResult.not_found && driveResult.not_found.length > 0) {
-                            log(`⚠️ Google Drive 中也未找到: ${driveResult.not_found.length} 个`, 'warning');
+                            log(window.i18n.t('log_drive_not_found', { count: driveResult.not_found.length }), 'warning', 'log_drive_not_found', { count: driveResult.not_found.length });
                             
                             // 弹窗提醒
                             if (driveResult.downloaded === 0) {
@@ -889,7 +1102,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         }
                     } else {
-                        log('❌ Google Drive 下载失败: ' + (driveResult.error || '未知错误'), 'error');
+                        log(window.i18n.t('log_drive_failed', { error: driveResult.error || 'Unknown' }), 'error', 'log_drive_failed', { error: driveResult.error || 'Unknown' });
                         // API 调用失败也弹窗
                         showNewSKUModal(preprocessResult.not_found.map(sku => ({ sku })));
                     }
@@ -899,7 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     processedCount = preprocessResult.processed;
                     
                     // 重新扫描找产品图
-                    log('🔍 正在扫描生成的产品图...', 'info');
+                    log(window.i18n.t('log_product_scanning'), 'info', 'log_product_scanning');
                     const scanResult = await window.api.scanLocalImages();
                     
                     if (scanResult.success && scanResult.images) {
@@ -911,16 +1124,16 @@ document.addEventListener('DOMContentLoaded', () => {
                             const composeResult = await window.api.compose(matchResult.matched);
                             
                             if (composeResult.success) {
-                                log(`✅ 合成完成: ${composeResult.composed} 个 SKU`, 'success');
+                                log(window.i18n.t('log_new_sku_composed', { count: composeResult.composed }), 'success', 'log_new_sku_composed', { count: composeResult.composed });
                             }
                         }
                     }
                 }
             } else {
-                log('❌ 预处理失败: ' + (preprocessResult.error || '未知错误'), 'error');
+                log(window.i18n.t('log_preprocess_failed', { error: preprocessResult.error || 'Unknown' }), 'error', 'log_preprocess_failed', { error: preprocessResult.error || 'Unknown' });
             }
         } catch (err) {
-            log('❌ 预处理出错: ' + err.message, 'error');
+            log(window.i18n.t('log_preprocess_error', { error: err.message }), 'error', 'log_preprocess_error', { error: err.message });
         }
         
         return processedCount;
@@ -928,10 +1141,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function clearLog() {
         logContainer.innerHTML = '';
+        logCache = [];
     }
 
-    // 日志函数
-    function log(message, type = 'info') {
+    // 日志函数（带翻译支持）
+    function log(message, type = 'info', key = null, params = {}) {
+        // 保存到缓存（用于语言切换时重新翻译）
+        logCache.push({
+            timestamp: Date.now(),
+            message: message,
+            type: type,
+            key: key,
+            params: params
+        });
+        
+        // 限制缓存大小，避免内存问题
+        if (logCache.length > 1000) {
+            logCache = logCache.slice(-500);
+        }
+
         const entry = document.createElement('div');
         entry.className = `log-entry log-${type}`;
 

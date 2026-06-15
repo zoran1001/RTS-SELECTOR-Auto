@@ -49,6 +49,21 @@ logger = logging.getLogger('ImageComposerBridge')
 app = Flask(__name__)
 CORS(app)
 
+# 配置 Flask 使用 UTF-8
+app.config['JSON_AS_ASCII'] = False
+app.config['JSONIFY_MIMETYPE'] = 'application/json; charset=utf-8'
+
+# 设置系统默认编码为 UTF-8
+import sys
+if sys.platform == 'win32':
+    try:
+        # Windows 控制台编码设置
+        import win32console
+        win32console.SetConsoleOutputCP(65001)  # UTF-8
+        win32console.SetConsoleCP(65001)
+    except ImportError:
+        pass
+
 # 全局变量
 DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
@@ -234,6 +249,53 @@ def health_check():
         'credentials_valid': credentials_valid,
         'pil_available': PIL_AVAILABLE
     })
+
+
+@app.route('/api/refresh-token', methods=['POST'])
+def refresh_token():
+    """刷新 OAuth2 凭证"""
+    global drive_service, sheets_service, credentials_valid
+    
+    try:
+        logger.info("尝试刷新 OAuth2 凭证...")
+        
+        # 重新加载凭证
+        creds = load_credentials()
+        
+        if creds and creds.valid:
+            # 如果凭证过期，尝试刷新
+            if creds.expired and creds.refresh_token:
+                logger.info("凭证已过期，尝试刷新...")
+                creds.refresh(Request())
+                
+                # 保存刷新后的凭证
+                with open(CREDENTIALS_FILE, 'w') as token:
+                    token.write(creds.to_json())
+                logger.info("凭证刷新成功并保存")
+            
+            # 重新创建服务
+            drive_service = build('drive', 'v3', credentials=creds)
+            sheets_service = build('sheets', 'v4', credentials=creds)
+            credentials_valid = True
+            
+            return jsonify({
+                'success': True,
+                'message': '凭证刷新成功'
+            })
+        else:
+            credentials_valid = False
+            return jsonify({
+                'success': False,
+                'error': '无法加载有效凭证，请检查 credentials/token.json 文件'
+            })
+            
+    except Exception as e:
+        logger.error(f"刷新凭证失败: {e}")
+        credentials_valid = False
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 
 @app.route('/api/config', methods=['GET'])
@@ -606,10 +668,22 @@ def load_sheets():
     active_status = data.get('active_status', config_cache.get('active_status', 'active')).strip().lower()
     exclude_kws = [kw.strip().lower() for kw in data.get('exclude_keywords', config_cache.get('exclude_keywords', []))]
     
+    # 获取 API Key（可选）
+    api_key = data.get('api_key', config_cache.get('api_key', '')).strip()
+    
     try:
-        # 加载凭证（复用于 Sheets 和 Drive）
-        if not load_credentials():
-            return jsonify({'success': False, 'error': '未连接到 Google API，请先配置凭证'}), 401
+        # 使用 API Key 或加载凭证
+        service = None
+        if api_key:
+            # 使用 API Key 创建服务
+            logger.info("使用 API Key 访问 Google Sheets")
+            from googleapiclient.discovery import build
+            service = build('sheets', 'v4', developerKey=api_key)
+        else:
+            # 使用 OAuth2 凭证
+            if not load_credentials():
+                return jsonify({'success': False, 'error': '未连接到 Google API，请先配置凭证或 API Key'}), 401
+            service = sheets_service
         
         # 提取 spreadsheet ID
         spreadsheet_id = None
@@ -637,7 +711,7 @@ def load_sheets():
         # 确定工作表名称
         range_str = None
         if gid is not None:
-            sheet_metadata = sheets_service.spreadsheets().get(
+            sheet_metadata = service.spreadsheets().get(
                 spreadsheetId=spreadsheet_id,
                 fields="sheets(properties(title,sheetId))"
             ).execute()
@@ -657,7 +731,7 @@ def load_sheets():
         logger.info(f"读取 Google Sheets: {spreadsheet_id} / {range_str}")
         
         # 读取数据
-        result = sheets_service.spreadsheets().values().get(
+        result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id,
             range=range_str
         ).execute()

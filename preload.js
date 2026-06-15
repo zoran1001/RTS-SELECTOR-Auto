@@ -149,6 +149,14 @@ contextBridge.exposeInMainWorld('api', {
         });
     },
 
+    // 刷新 OAuth2 凭证
+    refreshToken: async () => {
+        return await ipcRenderer.invoke('api-request', {
+            method: 'POST',
+            path: '/api/refresh-token'
+        });
+    },
+
     // 日志监听
     onLog: (callback) => {
         ipcRenderer.on('log', (event, data) => callback(data));

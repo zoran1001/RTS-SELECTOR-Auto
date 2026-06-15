@@ -57,6 +57,48 @@ body {
 .toolbar-right {
     display: flex;
     align-items: center;
+    gap: 10px;
+}
+
+/* 工具栏功能区 */
+.toolbar-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 16px;
+    border-left: 1px solid #1a1a2e;
+}
+
+.toolbar-section:first-of-type {
+    border-left: none;
+}
+
+.section-label {
+    font-size: 10px;
+    color: #666;
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.toolbar-section .btn {
+    margin: 2px 0;
+}
+
+/* 语言切换按钮 - 点缀色 */
+.btn-language {
+    background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+    color: #ffffff;
+    border: none;
+    padding: 6px 12px;
+    font-size: 9pt;
+    font-weight: bold;
+    border-radius: 6px;
+    min-width: 60px;
+}
+
+.btn-language:hover {
+    background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%);
+    box-shadow: 0 0 10px rgba(155, 89, 182, 0.5);
 }
 
 /* 按钮样式 */
@@ -515,6 +557,63 @@ body {
     color: #ffa502;
     font-size: 12px;
     margin-top: 10px;
+}
+
+/* 语言选择弹窗 */
+.modal-language {
+    width: 400px;
+    text-align: center;
+}
+
+.language-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin: 20px 0;
+}
+
+.btn-lang {
+    background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+    color: #ffffff;
+    border: none;
+    padding: 16px 40px;
+    font-size: 14pt;
+    font-weight: bold;
+    border-radius: 8px;
+    min-width: 120px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-lang:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(52, 152, 219, 0.4);
+}
+
+.btn-lang[data-lang="zh"] {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+}
+
+.btn-lang[data-lang="zh"]:hover {
+    box-shadow: 0 4px 15px rgba(231, 76, 60, 0.4);
+}
+
+.btn-lang[data-lang="en"] {
+    background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+}
+
+.btn-lang[data-lang="en"]:hover {
+    box-shadow: 0 4px 15px rgba(46, 204, 113, 0.4);
+}
+
+.language-hint {
+    color: #888;
+    font-size: 11px;
+    line-height: 1.6;
+    margin-top: 15px;
+    padding: 10px;
+    background: #141420;
+    border-radius: 6px;
 }
 
 /* 状态指示器 */
