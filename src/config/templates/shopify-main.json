@@ -1,0 +1,32 @@
+{
+  "id": "default",
+  "name": "Default Square Image",
+  "canvas": {
+    "width": 1080,
+    "height": 1080
+  },
+  "background": {
+    "type": "color",
+    "value": "#FFFFFF"
+  },
+  "productArea": {
+    "x": 80,
+    "y": 80,
+    "maxWidth": 920,
+    "maxHeight": 920,
+    "position": "center"
+  },
+  "processing": {
+    "trimTransparentEdges": true,
+    "scale": 1,
+    "offsetX": 0,
+    "offsetY": 0,
+    "shadow": false,
+    "reflection": false
+  },
+  "output": {
+    "folder": "output",
+    "format": "png",
+    "quality": 95
+  }
+}
